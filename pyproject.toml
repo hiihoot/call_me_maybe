@@ -1,13 +1,22 @@
 [project]
 name = "call-me-maybe"
 version = "0.1.0"
-requires-python = ">=3.10"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.14"
 dependencies = [
     "flake8>=7.3.0",
+    "llm-sdk",
     "mypy>=2.3.0",
-    "numpy",
+    "numpy>=2.5.1",
     "pydantic>=2.13.4",
     "rich>=15.0.0",
-    "torch",
-    "transformers>=5.14.1",
 ]
+
+[tool.uv.workspace]
+members = [
+    "llm_sdk",
+]
+
+[tool.uv.sources]
+llm-sdk = { workspace = true }
