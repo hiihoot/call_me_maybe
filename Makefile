@@ -17,8 +17,8 @@ clean:
 	@find . -type d -name "*.egg-info" -exec rm -rf {} +
 
 lint:
-	flake8 .
-	mypy . --warn-return-any --warn-unused-ignores --ignore-missing-imports --disallow-untyped-defs --check-untyped-defs
+	flake8 . --exclude=llm_sdk
+	mypy src --warn-return-any --warn-unused-ignores --ignore-missing-imports --disallow-untyped-defs --check-untyped-defs
 
 lint-strict:
 	flake8 .

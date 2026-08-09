@@ -70,7 +70,8 @@ def parse_definitions(path: str) -> List[FunctionCallSchema]:
     Raises:
         FileNotFoundError: If the file does not exist.
         PermissionError: If the file cannot be read.
-        ValueError: If the JSON is invalid, malformed, or schema validation fails.
+        ValueError: If the JSON is invalid, malformed,
+        or schema validation fails.
     """
     data = _read_json(path)
 
