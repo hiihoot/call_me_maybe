@@ -1,6 +1,7 @@
 """Generator: natural language → structured function calls."""
 import json
 from typing import Any, Dict, List
+from rich import print
 
 import numpy as np
 try:
@@ -10,17 +11,16 @@ except KeyboardInterrupt:
 
 
 class Generator:
-    """One LLM call picks the function;
+    """
+    One LLM call picks the function;
     iterative JSON completion extracts parameters.
     """
 
     def __init__(self, definitions: Any) -> None:
         self.llm = Small_LLM_Model()
         self.funcs: Dict[str, Dict[str, Any]] = {}
-        for d in (definitions if isinstance(definitions, list)
-                  else [definitions]):
-            item = (d.model_dump() if hasattr(d, "model_dump")
-                    else d.dict() if hasattr(d, "dict") else d)
+        for d in (definitions):
+            item = d.model_dump()
             if item.get("name"):
                 self.funcs[item["name"]] = item
         self.names = list(self.funcs.keys())
@@ -56,7 +56,6 @@ class Generator:
         """
         cur, toks = "", list(ctx)
         for _ in range(max_len):
-            # dtype=np.float32
             logits = np.array(self.llm.get_logits_from_input_ids(toks))
             valid = self.valid_exact(cur, allowed)
             if not valid:
@@ -105,7 +104,6 @@ class Generator:
         """
         cur, toks = "", list(ctx)
         for _ in range(max_len):
-            # dtype=np.float32
             logits = np.array(self.llm.get_logits_from_input_ids(toks))
             # Strings can be anything, so we use standard
             # argmax without a restrictive mask
