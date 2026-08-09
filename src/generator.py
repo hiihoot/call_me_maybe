@@ -24,9 +24,9 @@ class Generator:
             if item.get("name"):
                 self.funcs[item["name"]] = item
         self.names = list(self.funcs.keys())
-        self.vocab = self._load_vocab()
+        self.vocab = self.load_vocab()
 
-    def _load_vocab(self) -> Dict[int, str]:
+    def load_vocab(self) -> Dict[int, str]:
         with open(self.llm.get_path_to_vocab_file(), "r") as f:
             vocab = json.load(f)
         first = next(iter(vocab.keys()))
@@ -35,20 +35,22 @@ class Generator:
         return ({tid: tok.replace("Ġ", " ").replace("Ċ", "\n")
                  for tid, tok in it.items()})
 
-    def _encode(self, text: str) -> List[int]:
+    def encode(self, text: str) -> List[int]:
         raw = self.llm.encode(text)
         if hasattr(raw, "tolist"):
             raw = raw.tolist()
         return [int(x) for x in (raw[0]
                                  if raw and isinstance(raw[0], list) else raw)]
 
-    def _valid_exact(self, prefix: str, allowed: List[str]) -> List[int]:
+    def valid_exact(self, prefix: str, allowed: List[str]) -> List[int]:
         return [tid for tid, tok in self.vocab.items()
                 if any(a.startswith((prefix + tok).lstrip()) or
                        (prefix + tok).lstrip().startswith(a) for a in allowed)]
 
-    def _constrained_exact(self, ctx: List[int],
-                           allowed: List[str], max_len: int = 15) -> str:
+    def constrained_exact(
+            self, ctx: List[int],
+            allowed: List[str],
+            max_len: int = 15) -> str:
         """Forces output to exactly match
         one string from the 'allowed' list.
         """
@@ -56,7 +58,7 @@ class Generator:
         for _ in range(max_len):
             # dtype=np.float32
             logits = np.array(self.llm.get_logits_from_input_ids(toks))
-            valid = self._valid_exact(cur, allowed)
+            valid = self.valid_exact(cur, allowed)
             if not valid:
                 break
             mask = np.full_like(logits, -np.inf)
@@ -69,7 +71,7 @@ class Generator:
                 return cur.lstrip()
         return allowed[0] if allowed else ""
 
-    def _constrained_number(self, ctx: List[int], max_len: int = 15) -> str:
+    def constrained_number(self, ctx: List[int], max_len: int = 15) -> str:
         """Generates numbers by masking out all alphabetical characters."""
         cur, toks = "", list(ctx)
         for _ in range(max_len):
@@ -97,7 +99,7 @@ class Generator:
             toks.append(tid)
         return cur
 
-    def _constrained_string(self, ctx: List[int], max_len: int = 50) -> str:
+    def constrained_string(self, ctx: List[int], max_len: int = 50) -> str:
         """Generates an open string
         stopping only at an unescaped closing quote.
         """
@@ -123,7 +125,7 @@ class Generator:
                 toks.append(tid)
         return cur
 
-    def _props(self, func_def: Dict[str, Any]) -> Any:
+    def props(self, func_def: Dict[str, Any]) -> Any:
         p = func_def.get("parameters", {})
         if "properties" in p:
             return p["properties"]
@@ -142,12 +144,14 @@ class Generator:
             prompt_fn += f"- {name}: {spec.get('description', '')}\n"
         prompt_fn += 'Target Function: '
         try:
-            func_name = self._constrained_exact(self._encode(prompt_fn),
-                                                self.names, 15)
+            func_name = self.constrained_exact(
+                self.encode(prompt_fn),
+                self.names, 15
+                )
         except Exception:
             func_name = self.names[0] if self.names else ""
 
-        props = self._props(self.funcs.get(func_name, {}))
+        props = self.props(self.funcs.get(func_name, {}))
         params: Dict[str, Any] = {}
         # 2. Iterative JSON Construction
         # We build a fake JSON block and append it to the prompt.
@@ -163,21 +167,21 @@ class Generator:
 
             if enums:
                 quoted_enums = [f'"{e}"' for e in enums]
-                ctx = self._encode(param_prompt)
-                val = self._constrained_exact(ctx, quoted_enums)
+                ctx = self.encode(param_prompt)
+                val = self.constrained_exact(ctx, quoted_enums)
                 val = val.strip('"')
                 params[pname] = val
                 json_prefix += f'  "{pname}": "{val}",\n'
 
             elif ptype == "boolean":
-                ctx = self._encode(param_prompt)
-                val = self._constrained_exact(ctx, ["true", "false"])
+                ctx = self.encode(param_prompt)
+                val = self.constrained_exact(ctx, ["true", "false"])
                 params[pname] = (val == "true")
                 json_prefix += f'  "{pname}": {val},\n'
 
             elif ptype in ("integer", "number"):
-                ctx = self._encode(param_prompt)
-                val_str = self._constrained_number(ctx)
+                ctx = self.encode(param_prompt)
+                val_str = self.constrained_number(ctx)
                 clean = val_str.strip()
 
                 if ptype == "integer":
@@ -196,8 +200,8 @@ class Generator:
             else:  # string
                 # We physically add the opening quote
                 # to the prompt to force a string output
-                ctx = self._encode(param_prompt + '"')
-                val_str = self._constrained_string(ctx)
+                ctx = self.encode(param_prompt + '"')
+                val_str = self.constrained_string(ctx)
                 params[pname] = val_str
 
                 json_prefix += f'  "{pname}": "{val_str}",\n'
