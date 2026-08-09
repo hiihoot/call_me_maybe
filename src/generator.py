@@ -1,13 +1,14 @@
 """Generator: natural language → structured function calls."""
 import json
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 import numpy as np
+from pydantic import BaseModel
 from llm_sdk import Small_LLM_Model # ignore
 
 
 class Generator:
-    """One LLM call picks the function name; deterministic extraction fills params."""
+    """One LLM call picks the function; iterative JSON completion extracts parameters."""
 
     def __init__(self, definitions: Any) -> None:
         self.llm = Small_LLM_Model()
@@ -32,109 +33,89 @@ class Generator:
             raw = raw.tolist()
         return [int(x) for x in (raw[0] if raw and isinstance(raw[0], list) else raw)]
 
-    def _valid(self, prefix: str, allowed: List[str]) -> List[int]:
+    def _valid_exact(self, prefix: str, allowed: List[str]) -> List[int]:
         return [tid for tid, tok in self.vocab.items()
                 if any(a.startswith((prefix + tok).lstrip()) or (prefix + tok).lstrip().startswith(a) for a in allowed)]
 
-    def _constrained(self, ctx: List[int], allowed: List[str], max_len: int = 20) -> str:
+    def _constrained_exact(self, ctx: List[int], allowed: List[str], max_len: int = 15) -> str:
+        """Forces output to exactly match one string from the 'allowed' list."""
         cur, toks = "", list(ctx)
         for _ in range(max_len):
             logits = np.array(self.llm.get_logits_from_input_ids(toks), dtype=np.float32)
-            valid = self._valid(cur, allowed)
+            valid = self._valid_exact(cur, allowed)
             if not valid:
                 break
+            
             mask = np.full_like(logits, -np.inf)
             for tid in valid:
                 mask[tid] = logits[tid]
+                
             tid = int(np.argmax(mask))
             cur += self.vocab.get(tid, "")
             toks.append(tid)
+            
             if cur.lstrip() in allowed:
                 return cur.lstrip()
         return allowed[0] if allowed else ""
 
-    def _pick_function(self, prompt: str) -> str:
-        text = f'User Request: "{prompt}"\nWhich function should be called?\n'
-        for name, spec in self.funcs.items():
-            text += f"- {name}: {spec.get('description', '')}\n"
-        return self._constrained(self._encode(text + "Function Name: "), self.names, 15)
+    def _constrained_number(self, ctx: List[int], max_len: int = 15) -> str:
+        """Generates numbers by masking out all alphabetical characters."""
+        cur, toks = "", list(ctx)
+        for _ in range(max_len):
+            logits = np.array(self.llm.get_logits_from_input_ids(toks), dtype=np.float32)
+            
+            valid = []
+            for tid, tok in self.vocab.items():
+                clean = tok.strip()
+                # Allow digits, math symbols, spaces, AND JSON boundaries (comma, newline, brace)
+                if not clean or all(c.isdigit() or c in "-.,}\n" for c in clean):
+                    valid.append(tid)
+                    
+            if not valid:
+                break
+                
+            mask = np.full_like(logits, -np.inf)
+            for tid in valid:
+                mask[tid] = logits[tid]
+                
+            tid = int(np.argmax(mask))
+            tok_str = self.vocab.get(tid, "")
+            
+            # Stop generation exactly at the JSON boundary
+            if any(c in tok_str for c in ",\n}"):
+                idx = min([tok_str.find(c) for c in ",\n}" if c in tok_str])
+                cur += tok_str[:idx]
+                break
+                
+            cur += tok_str
+            toks.append(tid)
+            
+        return cur
 
-    def _nums(self, text: str) -> List[float]:
-        out, i, n = [], 0, len(text)
-        while i < n:
-            if text[i] == "-" or text[i].isdigit():
-                j = i + (1 if text[i] == "-" else 0)
-                if j < n and text[j].isdigit():
-                    s = ("-" if text[i] == "-" else "")
-                    i += len(s)
-                    while i < n and text[i].isdigit():
-                        s += text[i]; i += 1
-                    if i < n and text[i] == ".":
-                        s += "."; i += 1
-                        while i < n and text[i].isdigit():
-                            s += text[i]; i += 1
-                    try:
-                        out.append(float(s))
-                    except ValueError:
-                        pass
-                    continue
-            i += 1
-        return out
-
-    def _quoted(self, text: str) -> List[str]:
-        out, i, n = [], 0, len(text)
-        while i < n:
-            if text[i] in ('"', "'"):
-                q, start = text[i], i + 1
-                i += 1
-                while i < n and not (text[i] == q and text[i - 1] != "\\"):
-                    i += 1
-                out.append(text[start:i])
-                i += 1
-                continue
-            i += 1
-        return out
-
-    def _path(self, text: str) -> Optional[str]:
-        for i, ch in enumerate(text):
-            if ch in ("/", "~"):
-                j = i + 1
-                while j < len(text) and text[j] not in " \t\n\"'":
-                    j += 1
-                return text[i:j]
-            if i + 2 < len(text) and text[i + 1] == ":" and text[i + 2] == "\\" and ch.isalpha():
-                j = i + 3
-                while j < len(text) and text[j] not in " \t\n\"'":
-                    j += 1
-                return text[i:j]
-        return None
-
-    def _by_name(self, prompt: str, pname: str) -> Optional[str]:
-        low, nl = prompt.lower(), pname.lower()
-        ci = low.find(nl + ":")
-        if ci != -1:
-            return prompt[ci + len(pname) + 1:].strip()
-        idx = low.find(nl)
-        if idx != -1:
-            rest = prompt[idx + len(pname):]
-            for q in ("'", '"'):
-                s = rest.find(q)
-                if s != -1:
-                    e = s + 1
-                    while e < len(rest):
-                        if rest[e] == "\\":
-                            e += 2
-                        elif rest[e] == q:
-                            return rest[s + 1:e]
-                        else:
-                            e += 1
-            words = prompt[:idx].rstrip().split()
-            if words:
-                w = words[-1]
-                if w.lower() in {"the", "a", "an"} and len(words) > 1:
-                    w = words[-2]
-                return w
-        return None
+    def _constrained_string(self, ctx: List[int], max_len: int = 50) -> str:
+        """Generates an open string, stopping only at an unescaped closing quote."""
+        cur, toks = "", list(ctx)
+        for _ in range(max_len):
+            logits = np.array(self.llm.get_logits_from_input_ids(toks), dtype=np.float32)
+            
+            # Strings can be anything, so we use standard argmax without a restrictive mask
+            tid = int(np.argmax(logits))
+            tok_str = self.vocab.get(tid, "")
+            
+            if '"' in tok_str:
+                idx = tok_str.find('"')
+                # If the quote is escaped (\"), keep going. Otherwise, break.
+                if idx > 0 and tok_str[idx-1] == '\\':
+                    cur += tok_str
+                    toks.append(tid)
+                else:
+                    cur += tok_str[:idx]
+                    break
+            else:
+                cur += tok_str
+                toks.append(tid)
+                
+        return cur
 
     def _props(self, func_def: Dict[str, Any]) -> Dict[str, Any]:
         p = func_def.get("parameters", {})
@@ -148,61 +129,66 @@ class Generator:
         if not self.funcs:
             return {"prompt": user_prompt, "name": "", "parameters": {}}
 
+        # 1. Function Routing
+        prompt_fn = f'User Request: "{user_prompt}"\nFunctions:\n'
+        for name, spec in self.funcs.items():
+            prompt_fn += f"- {name}: {spec.get('description', '')}\n"
+        prompt_fn += f'Target Function: '
+        
         try:
-            func_name = self._pick_function(user_prompt)
+            func_name = self._constrained_exact(self._encode(prompt_fn), self.names, 15)
         except Exception:
             func_name = self.names[0] if self.names else ""
 
         props = self._props(self.funcs.get(func_name, {}))
         params: Dict[str, Any] = {}
-        numbers = self._nums(user_prompt)
-        quoted = self._quoted(user_prompt)
-        lower = user_prompt.lower()
-        ni = si = 0
-
+        
+        # 2. Iterative JSON Construction
+        # We build a fake JSON block and append it to the prompt. 
+        # This forces the LLM to complete the data structure instead of answering a question.
+        json_prefix = f'User: {user_prompt}\nCall: {func_name}\nArguments:\n{{\n'
+        
         for pname, pschema in props.items():
             ptype = pschema.get("type", "string")
             enums = pschema.get("enum", [])
-
+            
+            # Start asking for the parameter
+            param_prompt = json_prefix + f'  "{pname}": '
+            
             if enums:
-                pick = next((v for v in enums if v.lower() in lower), None)
-                params[pname] = pick if pick else enums[0]
+                quoted_enums = [f'"{e}"' for e in enums]
+                ctx = self._encode(param_prompt)
+                val = self._constrained_exact(ctx, quoted_enums)
+                val = val.strip('"')
+                params[pname] = val
+                json_prefix += f'  "{pname}": "{val}",\n'
+                
             elif ptype == "boolean":
-                params[pname] = "true" in lower or "yes" in lower
+                ctx = self._encode(param_prompt)
+                val = self._constrained_exact(ctx, ["true", "false"])
+                params[pname] = (val == "true")
+                json_prefix += f'  "{pname}": {val},\n'
+                
             elif ptype in ("integer", "number"):
-                if ni < len(numbers):
-                    v = numbers[ni]
-                    ni += 1
-                    params[pname] = int(v) if ptype == "integer" else v
+                ctx = self._encode(param_prompt)
+                val_str = self._constrained_number(ctx)
+                clean = val_str.strip()
+                
+                if ptype == "integer":
+                    params[pname] = int(clean) if clean.lstrip('-').isdigit() else 0
                 else:
-                    params[pname] = 0 if ptype == "integer" else 0.0
-            elif ptype == "string":
-                val = self._by_name(user_prompt, pname)
-                if val is not None:
-                    if val in quoted:
-                        quoted.remove(val)
-                    params[pname] = val
-                    continue
-
-                if any(k in pname.lower() for k in ("path", "file")):
-                    pval = self._path(user_prompt)
-                    if pval is not None:
-                        params[pname] = pval
-                        continue
-
-                if si < len(quoted):
-                    params[pname] = quoted[si]
-                    si += 1
-                    continue
-
-                for w in reversed(user_prompt.split()):
-                    c = w.strip(".,!?;:'\"()[]{}")
-                    if c and not any(ch.isdigit() for ch in c):
-                        params[pname] = c
-                        break
-                else:
-                    params[pname] = ""
-            else:
-                params[pname] = None
+                    try: params[pname] = float(clean)
+                    except ValueError: params[pname] = 0.0
+                    
+                # Feed the successful extraction back into the prompt for the next parameter
+                json_prefix += f'  "{pname}": {params[pname]},\n'
+                
+            else: # string
+                # We physically add the opening quote to the prompt to force a string output
+                ctx = self._encode(param_prompt + '"')
+                val_str = self._constrained_string(ctx)
+                params[pname] = val_str
+                
+                json_prefix += f'  "{pname}": "{val_str}",\n'
 
         return {"prompt": user_prompt, "name": func_name, "parameters": params}
