@@ -29,18 +29,16 @@ class Generator:
     def load_vocab(self) -> Dict[int, str]:
         with open(self.llm.get_path_to_vocab_file(), "r") as f:
             vocab = json.load(f)
-        first = next(iter(vocab.keys()))
-        it = ({int(v): k for k, v in vocab.items()} if isinstance(first, str)
-              else {int(k): v for k, v in vocab.items()})
         return ({tid: tok.replace("Ġ", " ").replace("Ċ", "\n")
-                 for tid, tok in it.items()})
+                 for tok, tid in vocab.items()})
 
     def encode(self, text: str) -> List[int]:
         raw = self.llm.encode(text)
         if hasattr(raw, "tolist"):
             raw = raw.tolist()
-        return [int(x) for x in (raw[0]
-                                 if raw and isinstance(raw[0], list) else raw)]
+        if raw and isinstance(raw[0], list):
+            raw = raw[0]
+        return [int(x) for x in raw]
 
     def valid_exact(self, prefix: str, allowed: List[str]) -> List[int]:
         return [tid for tid, tok in self.vocab.items()
@@ -74,7 +72,6 @@ class Generator:
         """Generates numbers by masking out all alphabetical characters."""
         cur, toks = "", list(ctx)
         for _ in range(max_len):
-            # dtype=np.float32
             logits = np.array(self.llm.get_logits_from_input_ids(toks))
             valid = []
             for tid, tok in self.vocab.items():
