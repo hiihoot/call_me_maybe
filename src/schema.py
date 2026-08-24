@@ -109,6 +109,7 @@ def parse_definitions(path: str) -> List[FunctionCallSchema]:
                 f"Function definition at index {idx} is missing required "
                 f"key 'returns'"
             )
+        parsed.append(FunctionCallSchema(**item))
     return parsed
 
 
