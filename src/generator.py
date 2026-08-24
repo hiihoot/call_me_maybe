@@ -1,7 +1,7 @@
 """Generator: natural language → structured function calls."""
 import json
 from typing import Any, Dict, List
-from rich import print
+# from rich import print
 
 import numpy as np
 try:

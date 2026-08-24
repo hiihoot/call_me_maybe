@@ -16,7 +16,7 @@ class FunctionCallSchema(BaseModel):
     returns: Dict[str, Any]
 
 
-def _read_json(path: str) -> Any:
+def read_json(path: str) -> Any:
     """Read and parse a JSON file with thorough validation.
 
     Args:
@@ -73,7 +73,7 @@ def parse_definitions(path: str) -> List[FunctionCallSchema]:
         ValueError: If the JSON is invalid, malformed,
         or schema validation fails.
     """
-    data = _read_json(path)
+    data = read_json(path)
 
     if not isinstance(data, list):
         raise ValueError(
@@ -94,13 +94,21 @@ def parse_definitions(path: str) -> List[FunctionCallSchema]:
                 f"Function definition at index {idx} is missing required "
                 f"key 'name'"
             )
-        try:
-            parsed.append(FunctionCallSchema(**item))
-        except ValidationError as exc:
+        if "description" not in item:
             raise ValueError(
-                f"Schema validation failed for function "
-                f"'{item.get('name', '<unknown>')}' at index {idx}: {exc}"
-            ) from exc
+                f"Function definition at index {idx} is missing required "
+                f"key 'description'"
+            )
+        if "parameters" not in item:
+            raise ValueError(
+                f"Function definition at index {idx} is missing required "
+                f"key 'parameters'"
+            )
+        if "returns" not in item:
+            raise ValueError(
+                f"Function definition at index {idx} is missing required "
+                f"key 'returns'"
+            )
     return parsed
 
 
@@ -118,7 +126,7 @@ def parse_prompts(path: str) -> List[str]:
         PermissionError: If the file cannot be read.
         ValueError: If the JSON is invalid or malformed.
     """
-    data = _read_json(path)
+    data = read_json(path)
 
     if not isinstance(data, list):
         raise ValueError(
