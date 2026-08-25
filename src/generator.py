@@ -135,13 +135,17 @@ class Generator:
                 toks.append(tid)
         return cur
 
-    def props(self, func_def: Dict[str, Any]) -> Any:
-        p = func_def.get("parameters", {})
-        if "properties" in p:
-            return p["properties"]
-        if isinstance(p, dict) and any(isinstance(v, dict) and
-                                       "type" in v for v in p.values()):
-            return p
+    def props(self, func_def: Dict[str, Any]) -> Dict[str, Any]:
+        parameters = func_def.get("parameters", {})
+
+        # 2. Shorthand format (direct mapping of arg_name -> type dict)
+        # Example: {"parameters": {"a": {"type": "integer"}, "b": {"type": "integer"}}}
+        if isinstance(parameters, dict):
+            for value in parameters.values():
+                if isinstance(value, dict) and "type" in value:
+                    return parameters
+
+        # 3. Fallback if no valid parameters exist
         return {}
 
     def run_prompt(self, user_prompt: str) -> Dict[str, Any]:
@@ -163,27 +167,15 @@ class Generator:
 
         props = self.props(self.funcs.get(func_name, {}))
         params: Dict[str, Any] = {}
-        # 2. Iterative JSON Construction
-        # We build a fake JSON block and append it to the prompt.
-        # This forces the LLM to complete
-        # the data structure instead of answering a question.
         json_prefix = (f'User: {user_prompt}\nCall:'
                        f'{func_name}\nArguments:\n{{\n')
+        
         for pname, pschema in props.items():
             ptype = pschema.get("type", "string")
-            enums = pschema.get("enum", [])
             # Start asking for the parameter
             param_prompt = json_prefix + f'  "{pname}": '
 
-            if enums:
-                quoted_enums = [f'"{e}"' for e in enums]
-                ctx = self.encode(param_prompt)
-                val = self.constrained_exact(ctx, quoted_enums)
-                val = val.strip('"')
-                params[pname] = val
-                json_prefix += f'  "{pname}": "{val}",\n'
-
-            elif ptype == "boolean":
+            if ptype == "boolean":
                 ctx = self.encode(param_prompt)
                 val = self.constrained_exact(ctx, ["true", "false"])
                 params[pname] = (val == "true")
