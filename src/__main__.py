@@ -32,7 +32,7 @@ def main() -> int:
     )
     parser.add_argument(
         "--output",
-        default="data/output/function_calling_results.json",
+        default="data/output/function_calls.json",
         help="Path to output JSON file.",
     )
     args = parser.parse_args()

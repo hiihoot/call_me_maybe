@@ -37,14 +37,12 @@ def read_json(path: str) -> Any:
         raise ValueError(f"Path is not a file: {path}")
 
     try:
-        raw = file_path.read_text(encoding="utf-8")
+        raw = file_path.read_text()
     except PermissionError:
         raise PermissionError(
             f"Permission denied: cannot read {path}. "
             f"Check file permissions or run with appropriate access."
-        ) from None
-    except OSError as exc:
-        raise OSError(f"Cannot read file {path}: {exc}") from exc
+        )
 
     if not raw.strip():
         raise ValueError(f"File is empty: {path}")
@@ -55,7 +53,7 @@ def read_json(path: str) -> Any:
         raise ValueError(
             f"Invalid JSON in {path} at line {exc.lineno}, "
             f"column {exc.colno}: {exc.msg}"
-        ) from exc
+        )
 
 
 def parse_definitions(path: str) -> List[FunctionCallSchema]:
@@ -109,7 +107,12 @@ def parse_definitions(path: str) -> List[FunctionCallSchema]:
                 f"Function definition at index {idx} is missing required "
                 f"key 'returns'"
             )
-        parsed.append(FunctionCallSchema(**item))
+        try: 
+            parsed.append(FunctionCallSchema(**item))
+        except ValidationError as e:
+            clean_errors = e.errors()
+            field = str(*clean_errors[0]["loc"])
+            raise ValueError(f"{field}, {clean_errors[0]["msg"]}")
     return parsed
 
 
@@ -133,14 +136,10 @@ def parse_prompts(path: str) -> List[str]:
         raise ValueError(
             f"Expected a JSON array in {path}, got {type(data).__name__}"
         )
-    if not data:
-        raise ValueError(f"Prompts array is empty: {path}")
 
     prompts: List[str] = []
     for idx, item in enumerate(data):
-        if isinstance(item, str):
-            prompts.append(item)
-        elif isinstance(item, dict):
+        if isinstance(item, dict):
             if "prompt" not in item:
                 raise ValueError(
                     f"Prompt object at index {idx} missing required "
@@ -154,7 +153,7 @@ def parse_prompts(path: str) -> List[str]:
             prompts.append(item["prompt"])
         else:
             raise ValueError(
-                f"Prompt item at index {idx} must be a string or object, "
+                f"Prompt item at index {idx} must be an object, "
                 f"got {type(item).__name__}"
             )
     return prompts

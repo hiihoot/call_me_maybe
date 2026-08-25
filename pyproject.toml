@@ -7,7 +7,6 @@ requires-python = ">=3.14"
 dependencies = [
     "flake8>=7.3.0",
     "llm-sdk",
-    "mypy>=2.3.0",
     "numpy>=2.5.1",
     "pydantic>=2.13.4",
     "rich>=15.0.0",
