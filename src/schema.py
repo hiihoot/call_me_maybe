@@ -107,7 +107,7 @@ def parse_definitions(path: str) -> List[FunctionCallSchema]:
                 f"Function definition at index {idx} is missing required "
                 f"key 'returns'"
             )
-        try: 
+        try:
             parsed.append(FunctionCallSchema(**item))
         except ValidationError as e:
             clean_errors = e.errors()

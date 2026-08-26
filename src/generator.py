@@ -1,7 +1,6 @@
 """Generator: natural language → structured function calls."""
 import json
 from typing import Any, Dict, List
-# from rich import print
 
 import numpy as np
 try:
@@ -15,7 +14,6 @@ class Generator:
     One LLM call picks the function;
     iterative JSON completion extracts parameters.
     """
-
     def __init__(self, definitions: Any) -> None:
         self.llm = Small_LLM_Model()
         self.funcs: Dict[str, Dict[str, Any]] = {}
@@ -43,20 +41,13 @@ class Generator:
     def valid_exact(self, prefix: str, allowed: List[str]) -> List[int]:
         valid_ids = []
 
-        # 1. Loop through every token ID and token string in the vocabulary
         for tid, tok in self.vocab.items():
-            
-            # 2. Predict what the text will look like if we pick this token
             candidate_text = (prefix + tok).lstrip()
-            
-            # 3. Test candidate_text against each allowed target item
             for target in allowed:
-                
-                # Check A: Candidate is a partial match (e.g., "fn_add" matching "fn_add_numbers")
-                # Check B: Candidate has fully matched/completed target (e.g., "fn_add_numbers")
-                if target.startswith(candidate_text) or candidate_text.startswith(target):
+                if (target.startswith(candidate_text)
+                        or candidate_text.startswith(target)):
                     valid_ids.append(tid)
-                    break  # Match found! Stop checking targets and move to the next token
+                    break
 
         return valid_ids
 
@@ -101,7 +92,6 @@ class Generator:
                 mask[tid] = logits[tid]
             tid = int(np.argmax(mask))
             tok_str = self.vocab.get(tid, "")
-            # Stop generation exactly at the JSON boundary
             if any(c in tok_str for c in ",\n}"):
                 idx = min([tok_str.find(c) for c in ",\n}" if c in tok_str])
                 cur += tok_str[:idx]
@@ -117,13 +107,10 @@ class Generator:
         cur, toks = "", list(ctx)
         for _ in range(max_len):
             logits = np.array(self.llm.get_logits_from_input_ids(toks))
-            # Strings can be anything, so we use standard
-            # argmax without a restrictive mask
             tid = int(np.argmax(logits))
             tok_str = self.vocab.get(tid, "")
             if '"' in tok_str:
                 idx = tok_str.find('"')
-                # If the quote is escaped (\"), keep going. Otherwise, break.
                 if idx > 0 and tok_str[idx - 1] == '\\':
                     cur += tok_str
                     toks.append(tid)
@@ -137,22 +124,14 @@ class Generator:
 
     def props(self, func_def: Dict[str, Any]) -> Dict[str, Any]:
         parameters = func_def.get("parameters", {})
-
-        # 2. Shorthand format (direct mapping of arg_name -> type dict)
-        # Example: {"parameters": {"a": {"type": "integer"}, "b": {"type": "integer"}}}
         if isinstance(parameters, dict):
             for value in parameters.values():
                 if isinstance(value, dict) and "type" in value:
                     return parameters
 
-        # 3. Fallback if no valid parameters exist
         return {}
 
     def run_prompt(self, user_prompt: str) -> Dict[str, Any]:
-        if not self.funcs:
-            return {"prompt": user_prompt, "name": "", "parameters": {}}
-
-        # 1. Function Routing
         prompt_fn = f'User Request: "{user_prompt}"\nFunctions:\n'
         for name, spec in self.funcs.items():
             prompt_fn += f"- {name}: {spec.get('description', '')}\n"
@@ -161,7 +140,7 @@ class Generator:
             func_name = self.constrained_exact(
                 self.encode(prompt_fn),
                 self.names, 15
-                )
+            )
         except Exception:
             func_name = self.names[0] if self.names else ""
 
@@ -169,10 +148,9 @@ class Generator:
         params: Dict[str, Any] = {}
         json_prefix = (f'User: {user_prompt}\nCall:'
                        f'{func_name}\nArguments:\n{{\n')
-        
+
         for pname, pschema in props.items():
             ptype = pschema.get("type", "string")
-            # Start asking for the parameter
             param_prompt = json_prefix + f'  "{pname}": '
 
             if ptype == "boolean":
@@ -187,21 +165,16 @@ class Generator:
                 clean = val_str.strip()
 
                 if ptype == "integer":
-                    params[pname] = (int(clean) if clean.lstrip('-').isdigit()
+                    params[pname] = (int(clean) if clean.lstrip().isdigit()
                                      else 0)
                 else:
                     try:
                         params[pname] = float(clean)
                     except ValueError:
                         params[pname] = 0.0
-
-                # Feed the successful extraction back
-                # into the prompt for the next parameter
                 json_prefix += f'  "{pname}": {params[pname]},\n'
 
-            else:  # string
-                # We physically add the opening quote
-                # to the prompt to force a string output
+            else:
                 ctx = self.encode(param_prompt + '"')
                 val_str = self.constrained_string(ctx)
                 params[pname] = val_str
