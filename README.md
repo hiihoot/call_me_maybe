@@ -131,3 +131,5 @@ Aided in structuring architectural explanations, ASCII sequence flows, and forma
 #### Test Case Brainstorming
 
 Suggested edge-case parameter inputs for validating schema normalization functions.
+
+![peace out](https://media.giphy.com/media/v1.Y2lkPWVjZjA1ZTQ3bG42YWViMWc1dXRyZWNiMWhkZ3I5ZDJhODdtMHE4eGt4bHZzNmR3cyZlcD12MV9naWZzX3NlYXJjaCZjdD1n/Xfbeymt8iwqQmjZLSs/giphy.gif)
